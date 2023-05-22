@@ -1,20 +1,19 @@
 package org.amuji.hello;
 
 import lombok.extern.slf4j.Slf4j;
-import org.assertj.core.api.Assertions;
-import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static java.util.Arrays.asList;
 import static org.awaitility.Awaitility.await;
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertIterableEquals;
 
 @Slf4j
 class FluxTest {
@@ -45,12 +44,43 @@ class FluxTest {
                     log.info("{} - {}", Thread.currentThread().getName(), item);
                 });
 
-        List<String> expected = new ArrayList<>(Arrays.asList("APPLE", "ORANGE", "GRAPE", "BANANA", "STRAWBERRY"));
+        List<String> expected = new ArrayList<>(asList("APPLE", "ORANGE", "GRAPE", "BANANA", "STRAWBERRY"));
 
         // THEN
         log.info("The main thread is waiting");
         await().atMost(6, TimeUnit.SECONDS).untilAsserted(
-                () -> assertThat(consumed).containsExactlyElementsOf(expected));
+                () -> assertIterableEquals(expected, consumed));
+        log.info("The main thread is resumed, and the test is going to finish.");
+    }
+
+    @Test
+    void multiple_subscriber_can_be_registered() {
+        //GIVEN
+        Flux<String> flux = Flux.just("Apple", "Orange", "Grape", "Banana", "Strawberry");
+        List<String> consumedByUpper = new LinkedList<>();
+        flux.publishOn(Schedulers.parallel())
+                .log()  // 添加日志
+                .map(String::toUpperCase)
+                .subscribe(item -> {
+                    consumedByUpper.add(item);
+                    log.info("{} - {}", Thread.currentThread().getName(), item);
+                });
+
+        List<String> consumedByX = new LinkedList<>();
+        flux.publishOn(Schedulers.single())
+                .log()
+                .map(item -> String.format("%s-x", item))
+                .subscribe(item -> {
+                    consumedByX.add(item);
+                    log.info("{} - {}", Thread.currentThread().getName(), item);
+                });
+
+        // THEN
+        log.info("The main thread is waiting");
+        await().atMost(6, TimeUnit.SECONDS).untilAsserted(
+                () -> assertAll(
+                        () -> assertIterableEquals(asList("APPLE", "ORANGE", "GRAPE", "BANANA", "STRAWBERRY"), consumedByUpper),
+                        () -> assertIterableEquals(asList("Apple-x", "Orange-x", "Grape-x", "Banana-x", "Strawberry-x"), consumedByX)));
         log.info("The main thread is resumed, and the test is going to finish.");
     }
 }
